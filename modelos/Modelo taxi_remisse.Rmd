@@ -1,0 +1,1946 @@
+
+
+
+```{r}
+library(Hmisc)
+# install.packages("MKmisc")
+# library(MKmisc)
+library(ResourceSelection)
+library(Epi)
+library(aod)
+library(survey)
+library(moments)
+library(MASS)
+library(leaps)
+library(betareg)
+library(sm)
+library(funModeling) ############## ANALISIS DE VARIABLES
+library(corrplot) ############## ANALISIS DE CORRELACIONES
+library(caret)
+############## ANALISIS BIVARIADO - WOE BINNING
+library(woeBinning)
+library(smbinning)
+library(ggplot2)
+library(party)
+require(party, quietly = TRUE)
+```
+
+
+
+
+```{r}
+############### Funciones (Calculo)
+
+# Devuelve cortes unicos de los deciles y el primer y último veintil  
+bin_unique<-function(df,var){
+        
+        unique(c(quantile(df[var],0.05,na.rm = T),
+                 quantile(df[var],0.10,na.rm = T),
+                 quantile(df[var],0.15,na.rm = T),
+                 quantile(df[var],0.20,na.rm = T),
+                 quantile(df[var],0.25,na.rm = T),
+                 quantile(df[var],0.30,na.rm = T),
+                 quantile(df[var],0.35,na.rm = T),
+                 quantile(df[var],0.40,na.rm = T),
+                 quantile(df[var],0.45,na.rm = T),
+                 quantile(df[var],0.50,na.rm = T),
+                 quantile(df[var],0.55,na.rm = T),
+                 quantile(df[var],0.60,na.rm = T),
+                 quantile(df[var],0.65,na.rm = T),
+                 quantile(df[var],0.70,na.rm = T),
+                 quantile(df[var],0.75,na.rm = T),
+                 quantile(df[var],0.80,na.rm = T),
+                 quantile(df[var],0.85,na.rm = T),
+                 quantile(df[var],0.90,na.rm = T),
+                 quantile(df[var],0.95,na.rm = T)))
+}
+
+# Genera etiquetas para grupos en variable categóricas. (bin es una lista de vectores)
+group_biv<-function(df,var,bin){
+        if(length(bin)==1){
+                x_biv=ifelse(df[,var]%in%bin[[1]],"A","Z")}
+        if(length(bin)==2){
+                x_biv=ifelse(df[,var]%in%bin[[1]],"A",ifelse(df[,var]%in%bin[[2]],"B","Z"))}
+        if(length(bin)==3){
+                x_biv=ifelse(df[,var]%in%bin[[1]],"A",ifelse(df[,var]%in%bin[[2]],"B",ifelse(df[,var]%in%bin[[3]],"C","Z")))}
+        if(length(bin)==4){
+                x_biv=ifelse(df[,var]%in%bin[[1]],"A",ifelse(df[,var]%in%bin[[2]],"B",ifelse(df[,var]%in%bin[[3]],"C",
+                        ifelse(df[,var]%in%bin[[4]],"D","Z"))))}
+        if(length(bin)==5){
+                x_biv=ifelse(df[,var]%in%bin[[1]],"A",ifelse(df[,var]%in%bin[[2]],"B",ifelse(df[,var]%in%bin[[3]],"C",
+                        ifelse(df[,var]%in%bin[[4]],"D",ifelse(df[,var]%in%bin[[5]],"E","Z")))))}
+        if(length(bin)==6){
+                x_biv=ifelse(df[,var]%in%bin[[1]],"A",ifelse(df[,var]%in%bin[[2]],"B",ifelse(df[,var]%in%bin[[3]],"C",
+                        ifelse(df[,var]%in%bin[[4]],"D",ifelse(df[,var]%in%bin[[5]],"E",ifelse(df[,var]%in%bin[[6]],"F","Z"))))))}
+        if(length(bin)==7){
+                x_biv=ifelse(df[,var]%in%bin[[1]],"A",ifelse(df[,var]%in%bin[[2]],"B",ifelse(df[,var]%in%bin[[3]],"C",
+                        ifelse(df[,var]%in%bin[[4]],"D",ifelse(df[,var]%in%bin[[5]],"E",ifelse(df[,var]%in%bin[[6]],"F",
+                        ifelse(df[,var]%in%bin[[7]],"F","Z")))))))}
+        return(x_biv)
+}
+
+
+
+## Funciones para validación cruzada:
+
+# Muestra la tabla variable transformada por los cortes vs tasa de malos, materialidad y el IV resultante y devuelde variable transformada por los cortes
+
+iv_num_1<-function(df,var,malo,tm_dm,bin){
+        
+        x_biv=cut(df[,var], breaks = c(-Inf,bin,Inf))
+        writeLines(paste('\nResumen ',m,':',sep = ""))
+        mat=prop.table(table(x_biv, useNA = "ifany"))
+        tm=prop.table(table(x_biv,df[,malo],useNA="ifany"),1)[,2]
+        iv=smbinning.custom(df[c(var,'tm_dm')],'tm_dm',var,cuts=bin)$iv
+        print(round(cbind(tm,mat,iv)*100,2))
+        
+        return(x_biv)
+}
+
+iv_cat_1<-function(df,var,malo,tm_dm,bin=NULL){
+
+        df[,var]=as.factor(df[,var])
+        tm=prop.table(table(df[c(var,malo)], useNA = "ifany"),1)[,2]
+        mat=prop.table(table(df[c(var,malo)][,c(1)],useNA ="ifany"))
+        iv=smbinning.factor(cbind(df[c(var,malo)][var],df[tm_dm]),'tm_dm',var)$iv
+        tab_01=round(cbind(tm,mat,iv)*100,2)
+        
+
+        if (length(bin) == length(unique(df[,var])) || is.null(bin)) {
+                writeLines(paste('Resumen Original ',':',sep = "")); print(tab_01); x_biv=df[var]}
+        else{
+                x_biv=group_biv(df,var,bin)
+                tm=prop.table(table(x_biv,df[,malo],useNA="ifany"),1)[,2]
+                mat=prop.table(table(x_biv, useNA = "ifany"))
+                bin = c(gsub(" ", "", paste("'",unique(x_biv_tr),"'")),"'otros'")
+                iv=smbinning.factor.custom(cbind(x_biv,df[tm_dm]),'tm_dm','x_biv',groups=bin)$iv
+                tab_02=round(cbind(tm,mat,iv)*100,2)
+                writeLines(paste('Resumen Original ',':',sep = "")); print(tab_01)
+                writeLines(paste('\nResumen Propuesto ',':',sep = "")); print(tab_02)
+        }
+
+        return(x_biv)
+}
+
+
+## Funciones para división muestral:
+
+# Muestra la tabla variable transformada por los cortes vs tasa de malos, materialidad y el IV resultante y devuelde variable transformada por los cortes
+
+iv_num_2<-function(df_tr,df_ts,var,malo,tm_dm,bin){
+        
+        x_biv_tr=cut(df_tr[,var], breaks = c(-Inf,bin,Inf))
+        x_biv_ts=cut(df_ts[,var], breaks = c(-Inf,bin,Inf))
+        mat_tr=prop.table(table(x_biv_tr, useNA = "ifany"))
+        mat_ts=prop.table(table(x_biv_ts, useNA = "ifany"))
+        tm_tr=prop.table(table(x_biv_tr,df_tr[,malo],useNA="ifany"),1)[,2]
+        tm_ts=prop.table(table(x_biv_ts,df_ts[,malo],useNA="ifany"),1)[,2]
+        iv_tr=smbinning.custom(df_tr[c(var,'tm_dm')],'tm_dm',var,cuts=bin)$iv
+        iv_ts=smbinning.custom(df_ts[c(var,'tm_dm')],'tm_dm',var,cuts=bin)$iv
+        tb=round(cbind(tm_tr,tm_ts,mat_tr,mat_ts,iv_tr,iv_ts)*100,2)
+        x_biv<-list(x_biv_tr,x_biv_ts,tb)
+        return(x_biv)
+}
+
+iv_cat_2<-function(df_tr,df_ts,var,malo,tm_dm,bin=NULL){
+
+        df_tr[,var]=as.factor(df_tr[,var])
+        df_ts[,var]=as.factor(df_ts[,var])
+        tm_tr=prop.table(table(df_tr[c(var,malo)], useNA = "ifany"),1)[,2]
+        tm_ts=prop.table(table(df_ts[c(var,malo)], useNA = "ifany"),1)[,2]
+        mat_tr=prop.table(table(df_tr[c(var,malo)][,c(1)],useNA ="ifany"))
+        mat_ts=prop.table(table(df_ts[c(var,malo)][,c(1)],useNA="ifany"))
+        iv_tr=smbinning.factor(cbind(df_tr[c(var,malo)][var],df_tr[tm_dm]),'tm_dm',var)$iv
+        iv_ts=smbinning.factor(cbind(df_ts[c(var,malo)][var],df_ts[tm_dm]),'tm_dm',var)$iv
+        tab_01=round(cbind(tm_tr,tm_ts,mat_tr,mat_ts,iv_tr,iv_ts)*100,2)
+        
+
+        if (length(bin) == length(unique(df_tr[,var])) || is.null(bin)) {
+                writeLines(paste('Resumen',':',sep = "")); print(tab_01); 
+                x_biv_tr=df_tr[,var]; x_biv_ts=df_ts[,var]}
+        else{
+                x_biv_tr=group_biv(df_tr,var,bin)
+                x_biv_ts=group_biv(df_ts,var,bin)
+                tm_tr=prop.table(table(x_biv_tr,df_tr[,malo],useNA="ifany"),1)[,2]
+                tm_ts=prop.table(table(x_biv_ts,df_ts[,malo],useNA="ifany"),1)[,2]
+                mat_tr=prop.table(table(x_biv_tr, useNA = "ifany"))
+                mat_ts=prop.table(table(x_biv_ts, useNA = "ifany"))
+                bin = c(gsub(" ", "", paste("'",unique(x_biv_tr),"'")),"'otros'")
+                iv_tr=smbinning.factor.custom(cbind(x_biv_tr,df_tr[tm_dm]),'tm_dm','x_biv_tr',groups=bin)$iv
+                iv_ts=smbinning.factor.custom(cbind(x_biv_ts,df_ts[tm_dm]),'tm_dm','x_biv_ts',groups=bin)$iv
+                tab_02=round(cbind(tm_tr,tm_ts,mat_tr,mat_ts,iv_tr,iv_ts)*100,2)
+                writeLines(paste('Resumen Original ',':',sep = "")); print(tab_01)
+                writeLines(paste('\nResumen Propuesto ',':',sep = "")); print(tab_02)
+        }
+        
+        x_biv<-list(x_biv_tr,x_biv_ts)
+        return(x_biv)
+}
+
+
+############### Funciones (Alteryx)
+
+
+## Funciones para validación cruzada:
+
+iv_num_1_altyx<-function(df,var,malo,tm_dm,bin){
+
+        x_biv=cut(df[,var], breaks = c(-Inf,bin,Inf))
+        t1=as.data.frame.matrix(table(x_biv,df[,malo],useNA="ifany"))
+        m=dim(t1)[1]; n=dim(t1)[2]; a<-c(); for(i in 1:n){a[i]=sum(t1[,i])}
+        t2=rbind(t1,total=a)
+        m=dim(t2)[1]; a<-c(); for(i in 1:m){a[i]=sum(t2[i,])}
+        t3=cbind(t2,total=a);
+        a<-c(); for(i in 1:m){a[i]=round((t3[i,2]*100/t3[i,3]),1)}
+        t4=cbind(t3,porc_malos=a)
+        a<-c(); for(i in 1:m-1){a[i]=round((t4[i,3]*100/t4[m,3]),1)}
+        t5=cbind(t4,materialidad=c(a,NA))
+        a<-c(); for(i in 1:m-1){a[i]=round(log((t5[i,1]*100/t5[m,1])/(t5[i,2]*100/t5[m,2])),6)}
+        t6=cbind(t5,woe=c(a,NA))
+        a<-c(); for(i in 1:m-1){a[i]=round(((t6[i,1]*100/t6[m,1])-(t6[i,2]*100/t6[m,2]))*t6[i,6],2)}
+        t7=cbind(t6,iv=c(a,sum(a)))
+        a<-list(t7,t7[1:(m-1),c(5,6)],t7[m,7])
+
+    return(a)
+}
+
+
+
+## Funciones para división muestral:
+
+iv_num_2_altyx<-function(df_tr,df_ts,var,malo,tm_dm,bin){
+    
+        a<-iv_num_1_altyx(df_tr,var,malo,tm_dm,bin)
+        b<-iv_num_1_altyx(df_ts,var,malo,tm_dm,bin)
+        c<-list(a,b)
+    
+    return(c)
+}
+
+
+############### Funciones (Gráficos)
+
+
+# Gráfico de la tasa de malos (etiquetas) Vs Materialidad (Barras) y la cota de materialidad (limite = 5%):
+tm_mat_num<-function(x_biv,df,lim=0.05)
+{
+        mat=prop.table(table(x_biv, useNA = "ifany"))
+        tm=prop.table(table(x_biv,df[,'Malo_dm'],useNA="ifany"),1)[,2]
+        df=data.frame(cbind(level=c(1:(length(tm))),limit=rep(lim,(length(tm))),tm,mat))
+        if (length(which((is.na(x_biv)))) > 0) {df=df[-c(length(tm)),]}
+        g2<-ggplot(df,aes(x=level)) + 
+                geom_col(aes(y=mat),fill="skyblue",alpha=0.35) + 
+                geom_line(aes(y=limit,group=),group=1,color="red",alpha=0.35) +
+                geom_text(aes(y=tm,label=paste(round(tm*100,1),'%')),vjust=1,color="black",size=3.75) +
+                scale_y_continuous(sec.axis=sec_axis(~.,name="Tasa de malos[%]"))
+
+        return(g2)
+}
+
+
+```
+
+
+
+
+
+```{r}
+############ Base taxi
+df_taxi=read.table(file.choose(), header = T, sep = ',')
+```
+
+```{r}
+dim(df_taxi)
+```
+
+```{r}
+df_taxi$Malo_dm=as.factor(df_taxi$tm_dm)
+# df_taxi$Malo_prima=as.factor(df_taxi$tm_prima)
+```
+
+```{r}
+# summary(df_taxi[,1:20])
+```
+
+```{r}
+# df_taxi_train=subset(df_taxi,base%in%c('modelamiento') & cosecha<=201910)
+df_taxi_train=subset(df_taxi,cosecha >=201511&cosecha<=201712&filtro == 0)
+df_taxi_test=subset(df_taxi,cosecha >=201801&cosecha<=201812&filtro == 0)
+dim(df_taxi)
+dim(df_taxi_train)
+mean(df_taxi_train$tm_dm)
+dim(df_taxi_test)
+mean(df_taxi_test$tm_dm)
+# mean(df_taxi_train$tm_prima)
+```
+
+```{r}
+####### Tasa de Malos por Cosecha
+tabla_taxi_train_dm=aggregate(tm_dm~cosecha,data=df_taxi_train,mean)
+tabla_taxi_test_dm=aggregate(tm_dm~cosecha,data=df_taxi_test,mean)
+# tabla_taxi_train_prima=aggregate(tm_prima~cosecha,data=df_taxi_train,mean)
+```
+
+```{r}
+dim(tabla_taxi_train_dm)
+dim(tabla_taxi_test_dm)
+# dim(tabla_taxi_train_prima)
+```
+
+```{r}
+####### Grafico de Tasa de Malos por Cosecha
+####### analisis total: base train y test
+
+plot(tabla_taxi_train_dm$tm, type="l", xlab="Cosecha", xaxt="n",  ylab="TM", ylim=c(0,1), main="Tasa de Malos por Cosecha Train DM")
+axis(1, at=1:dim(tabla_taxi_train_dm)[1],lab=tabla_taxi_train_dm$cosecha, cex.axis=0.5)
+
+plot(tabla_taxi_test_dm$tm, type="l", xlab="Cosecha", xaxt="n",  ylab="TM", ylim=c(0,1), main="Tasa de Malos por Cosecha Test DM")
+axis(1, at=1:dim(tabla_taxi_test_dm)[1],lab=tabla_taxi_test_dm$cosecha, cex.axis=0.5)
+
+###
+
+# plot(tabla_taxi_train_prima$tm, type="l", xlab="Cosecha", xaxt="n",  ylab="TM", ylim=c(0,1), main="Tasa de Malos por Cosecha")
+# axis(1, at=1:dim(tabla_taxi_train_prima)[1],lab=tabla_taxi_train_prima$cosecha, cex.axis=1)
+```
+
+```{r}
+############## ANALISIS DE VARIABLES - UNIVARIADO
+# profiling_num(df_taxi[,1:50]) ## resumen de los estadisticos x cada variable
+# plot_num(df_taxi[,1:50]) ## dibuja los histogramas de las variables numericas
+# freq(df_taxi[,1:50]) ## dibuja los graficos de barras de las variables categoricas
+```
+
+```{r}
+############## ANALISIS DE VARIABLES - CONTEO 0 NA INF
+df_taxi_train_status=df_status(df_taxi_train)
+write.table(df_taxi_train_status,'D:/GIAP/Giordan/Acceso/Tareas/taxi/score_20_07/df_taxi_train_status.csv', sep=',')
+```
+
+```{r}
+############## ANALISIS DE VARIABLES - ESTADISTICOS
+df_taxi_train_analisis=profiling_num(df_taxi_train)
+write.table(df_taxi_train_analisis,'D:/GIAP/Giordan/Acceso/Tareas/taxi/score_20_07/df_taxi_train_analisis.csv', sep=',')
+```
+
+```{r}
+# Variables con varianza cero o casi cero
+# df_nearZeroVar=nearZeroVar(df_taxi_train, saveMetrics= TRUE)
+# df_nearZeroVar[df_nearZeroVar["zeroVar"] == T,]
+```
+
+```{r}
+############## ANALISIS DE CORRELACIONES
+# plot(df_gdp[,-1])
+# Cor  <- cor(df_gdp[,-1]) ## matriz de correlaciones
+# Cor
+# 
+# corrplot(Cor, method = "color", diag = F)
+# corrplot(Cor, method="number")
+# corrplot(Cor, method = "circle")
+# corrplot(Cor, method = "pie")
+# write.table(cor(df_taxi_train),'D:/df_taxi_train_corr.csv', sep=',')
+```
+
+```{r}
+head(df_taxi_train,3)
+```
+
+```{r}
+###############################
+######   ANALISIS BIVARIADO
+###############################
+
+############## GAIN RATIO
+# df_taxi_train_gr=matrix(1,212)
+# for (j in 1:210)
+# {df_taxi_train_gr[j]=gain_ratio(df_taxi_train[,j],df_taxi_train$tm_prima)}
+# write.table(cbind(as.matrix(colnames(df_taxi_train),1,210),df_taxi_train_gr),'D:/01.Comite_Riesgos/08 Centro de Modelos de Riesgos/002 CREDIT SCORING/NO TRADICIONALES/LD Consumo/2020/02.Febrero/MODELO/df_taxi_train_gr.csv', sep=',')
+```
+
+```{r}
+############## ANALISIS BIVARIADO - WOE BINNING
+```
+
+```{r}
+### tratamiento previo:
+
+# ci_pv:
+df_taxi_train$ci_pv=df_taxi_train$ci/df_taxi_train$pv
+df_taxi_test$ci_pv=df_taxi_test$ci/df_taxi_test$pv
+
+# zona:
+A=c('SANTA ROSA','MAGDALENA DEL MAR','PUEBLO LIBRE','ANCON','JESUS MARIA','BARRANCO','LIMA','BRENA','LINCE',
+    'LA VICTORIA','CARABAYLLO','SURQUILLO')
+B=c('CALLAO')
+
+C=c('SAN MARTIN DE PORRES','SANTA ANITA','ATE','COMAS','VILLA MARIA DEL TRIUNFO','SAN JUAN DE MIRAFLORES','PUENTE PIEDRA','RIMAC',
+    'SAN BORJA','LOS OLIVOS','LURIN')
+D=c('SAN JUAN DE LURIGANCHO','PACHACAMAC','SAN MIGUEL','VILLA EL SALVADOR','SANTIAGO DE SURCO','CHORRILLOS','LA MOLINA',
+    'EL AGUSTINO','INDEPENDENCIA','CIENEGUILLA','SAN LUIS','LURIGANCHO (CHOSICA)','CHACLACAYO','MIRAFLORES')
+E=c('HUANUCO','ICA','PIURA','LAMBAYEQUE','LA LIBERTAD','AREQUIPA')
+
+df_taxi_train$zona=as.factor(ifelse(df_taxi_train$distrito%in%A,'zona_a',
+                                ifelse(df_taxi_train$distrito%in%C,'zona_c',
+                                ifelse(df_taxi_train$distrito%in%D,'zona_d',
+                                ifelse(df_taxi_train$departamento%in%B,'zona_b',
+                                ifelse(df_taxi_train$departamento%in%E || df_taxi_train$provincia%in%c('HUAROCHIRI'),'zona_e','otros'))))))
+df_taxi_test$zona=as.factor(ifelse(df_taxi_test$distrito%in%A,'zona_a',
+                                ifelse(df_taxi_test$distrito%in%C,'zona_c',
+                                ifelse(df_taxi_test$distrito%in%D,'zona_d',
+                                ifelse(df_taxi_test$departamento%in%B,'zona_b',
+                                ifelse(df_taxi_test$departamento%in%E || df_taxi_test$provincia%in%c('HUAROCHIRI'),'zona_e','otros'))))))
+
+# nse:
+AB=c('BARRANCO','JESUS MARIA','LA MOLINA','LINCE','MAGDALENA DEL MAR','MIRAFLORES','PUEBLO LIBRE','SAN BORJA','SAN ISIDRO',
+    'SAN MIGUEL','SANTIAGO DE SURCO','SURQUILLO')
+
+C=c('ANCON','ATE','BELLAVISTA','BRENA','CALLAO','CARABAYLLO','CARMEN DE LA LEGUA REYNOSO','CHACLACAYO','CHORRILLOS','CIENEGUILLA',
+    'COMAS','EL AGUSTINO','INDEPENDENCIA','LA PERLA','LA PUNTA','LA VICTORIA','LIMA','LOS OLIVOS','LURIGANCHO (CHOSICA)','LURIN',
+    'MI PERU','PACHACAMAC','PUCUSANA','PUENTE PIEDRA','PUNTA HERMOSA','PUNTA NEGRA','RIMAC','SAN BARTOLO','SAN JUAN DE LURIGANCHO',
+    'SAN JUAN DE MIRAFLORES','SAN LUIS','SAN MARTIN DE PORRES','SANTA ANITA','SANTA MARIA DEL MAR','SANTA ROSA','VENTANILLA',
+    'VILLA EL SALVADOR','VILLA MARIA DEL TRIUNFO')
+
+df_taxi_train$nse=as.factor(ifelse(df_taxi_train$distrito%in%AB,'AB',ifelse(df_taxi_train$distrito%in%C,'C','otros')))
+df_taxi_test$nse=as.factor(ifelse(df_taxi_test$distrito%in%AB,'AB',ifelse(df_taxi_test$distrito%in%C,'C','otros')))
+```
+
+```{r}
+# colnames(df_taxi_train)
+# summary(df_taxi_train[,c(4:20,23:210,212:214)])
+```
+
+
+```{r}
+df_taxi_train_woes=woe.binning(df_taxi_train,"tm_dm",colnames(df_taxi_train[,c(10:12,16:18,20,23:210,212:214)]),min.perc.total=0.05)
+# df_taxi_train_woes=woe.binning(df_taxi_train,"tm_prima",colnames(df_taxi_train[,c(7:212)]),min.perc.total=0.05)
+
+# df_taxi_train_woes ## resumen ordernado de IV mayor a menor
+# woe.binning.table(df_taxi_train_woes) ## resumen de tablas woe
+
+# a=c();b=c()
+# k=dim(df_taxi_train_woes)[1]
+# for(i in 1:k){
+#     a[i]=df_taxi_train_woes[,1][[i]]
+#     b[i]=df_taxi_train_woes[,3][[i]]
+# }
+# m=as.data.frame(cbind(a,b))
+# m$b=as.numeric(as.character(m$b))
+
+# df_taxi_train[c('co','base','tm_dm','Malo_dm')]
+write.table(df_taxi_train_woes[,c(1,3)],'D:/GIAP/Giordan/Acceso/Tareas/taxi/score_20_07/df_taxi_train_woes.csv', sep=',')
+```
+
+```{r}
+# prueba individual:
+tb=woe.binning(df_taxi_train, "tm_dm", "zona")[[2]][c(1,6,5,4)] # table # c(2,3,6,5,1,4) # vector opcional
+colnames(tb)=c("buenos","malos","woe","iv"); tb
+```
+
+
+
+
+```{r warning=FALSE}
+############## BIVARIADO - Negocio (solicitadas)
+
+### pv && cm
+var_01 = "cm"
+var_02 = "saldo_1m"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# writeLines(var_01)
+bin=bin_unique(df_tr,var_01)
+# bin=seq(200,1600,100)
+bin=seq(1400,1500,20)
+bin=c(1500)
+iv_num_2(df_tr,df_ts,var_01,'Malo_dm','tm_dm',bin)[[3]]
+# writeLines('\n')
+bin=c(1500)
+# iv_num_2(df_tr,df_ts,var_01,'Malo_dm','tm_dm',bin)[[3]]
+CM_biv1=iv_num_2(df_tr,df_ts,var_01,'Malo_dm','tm_dm',bin)[[1]]
+CM_biv2=iv_num_2(df_tr,df_ts,var_01,'Malo_dm','tm_dm',bin)[[2]]
+
+# writeLines('\n')
+
+# writeLines(var_02)
+bin=bin_unique(df_tr,var_02)
+bin=seq(500,10000,500)
+# bin=c(1000)
+# iv_num_2(df_tr,df_ts,var_02,'Malo_dm','tm_dm',bin)[[3]]
+SALDO_biv1=iv_num_2(df_tr,df_ts,var_02,'Malo_dm','tm_dm',bin)[[1]]
+SALDO_biv2=iv_num_2(df_tr,df_ts,var_02,'Malo_dm','tm_dm',bin)[[2]]
+
+
+# ftb_tr=ftable(CM_biv1,SALDO_biv1,df_tr$Malo,dnn=c("CM","SALDO","Malo"), exclude = c() )
+# writeLines('Train'); round(prop.table(ftb_tr,1)*100,2); #ftb_tr
+# 
+# ftb_ts=ftable(CM_biv2,SALDO_biv2,df_ts$Malo,dnn=c("CM","SALDO","Malo"), exclude = c())
+# writeLines('Test'); round(prop.table(ftb_ts,1)*100,2); #ftb_ts
+
+# cuts:
+
+cm_s1m_biv1=ifelse(df_tr$cm<=1500&is.na(df_tr$saldo_1m),'A1',
+            ifelse(df_tr$cm<=1500&df_tr$saldo_1m>0,'A2',
+
+            ifelse(df_tr$cm> 1500&is.na(df_tr$saldo_1m),'B1','B2')))
+
+cm_s1m_biv2=ifelse(df_ts$cm<= 1500&is.na(df_ts$saldo_1m),'A1',
+            ifelse(df_ts$cm<= 1500&df_ts$saldo_1m>0,'A2',
+
+            ifelse(df_ts$cm> 1500&is.na(df_ts$saldo_1m),'B1','B2')))
+
+tb_biv2_tr=table(cm_s1m_biv1,df_tr$Malo, useNA = "ifany")
+writeLines('Train');round(prop.table(tb_biv2_tr,1)*100,2);tb_biv2_tr
+
+tb_biv2_ts=table(cm_s1m_biv2,df_ts$Malo, useNA = "ifany")
+writeLines('Test');round(prop.table(tb_biv2_ts,1)*100,2);tb_biv2_ts
+```
+
+```{r warning=FALSE}
+### pv && ci
+var_01 = "pv"
+var_02 = "ci"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+bin=bin_unique(df_tr,var_01)
+bin=c(38000,46000)
+# bin=c(43000,50000)
+# iv_num_2(df_tr,df_ts,var_01,'Malo_dm','tm_dm',bin)[[3]]
+PV_biv1=iv_num_2(df_tr,df_ts,var_01,'Malo_dm','tm_dm',bin)[[1]]
+PV_biv2=iv_num_2(df_tr,df_ts,var_01,'Malo_dm','tm_dm',bin)[[2]]
+
+bin=bin_unique(df_tr,var_02)
+bin=c(1500,2380)
+bin=seq(0,6000,1000)
+# iv_num_2(df_tr,df_ts,var_02,'Malo_dm','tm_dm',bin)[[3]]
+CI_biv1=iv_num_2(df_tr,df_ts,var_02,'Malo_dm','tm_dm',bin)[[1]]
+CI_biv2=iv_num_2(df_tr,df_ts,var_02,'Malo_dm','tm_dm',bin)[[2]]
+
+
+# ftb_tr=ftable(PV_biv1,CI_biv1,df_tr$Malo,dnn=c("PV","CI","Malo"))
+# writeLines('Train'); round(prop.table(ftb_tr,1)*100,2); ftb_tr
+# 
+# ftb_ts=ftable(PV_biv2,CI_biv2,df_taxi_test$Malo,dnn=c("PV","CI","Malo"))
+# writeLines('Test'); round(prop.table(ftb_ts,1)*100,2); ftb_ts
+
+# cuts:
+
+pv_ci_biv1=ifelse(df_tr$pv<=38000&df_tr$ci<=4000,'A1',
+           ifelse(df_tr$pv<=38000&df_tr$ci<=5000,'A2',
+           ifelse(df_tr$pv<=38000&df_tr$ci> 5000,'A3',
+
+           ifelse(df_tr$pv<=46000&df_tr$ci<=6000,'B1',
+           ifelse(df_tr$pv<=46000&df_tr$ci> 6000,'B2',
+
+           ifelse(df_tr$pv> 46000&df_tr$ci<=4000,'C1',
+           ifelse(df_tr$pv> 46000&df_tr$ci<=6000,'C2',
+           ifelse(df_tr$pv> 46000&df_tr$ci> 6000,'C3','otros'))))))))
+
+pv_ci_biv2=ifelse(df_ts$pv<=38000&df_ts$ci<=4000,'A1',
+           ifelse(df_ts$pv<=38000&df_ts$ci<=5000,'A2',
+           ifelse(df_ts$pv<=38000&df_ts$ci> 5000,'A3',
+
+           ifelse(df_ts$pv<=46000&df_ts$ci<=6000,'B1',
+           ifelse(df_ts$pv<=46000&df_ts$ci> 6000,'B2',
+
+           ifelse(df_ts$pv> 46000&df_ts$ci<=4000,'C1',
+           ifelse(df_ts$pv> 46000&df_ts$ci<=6000,'C2',
+           ifelse(df_ts$pv> 46000&df_ts$ci> 6000,'C3','otros'))))))))
+
+tb_biv2_tr=table(pv_ci_biv1,df_tr$Malo, useNA = "ifany")
+writeLines('Train');round(prop.table(tb_biv2_tr,1)*100,2); tb_biv2_tr
+
+tb_biv2_ts=table(pv_ci_biv2,df_ts$Malo, useNA = "ifany")
+writeLines('Test');round(prop.table(tb_biv2_ts,1)*100,2); tb_biv2_ts
+```
+
+
+
+
+
+
+```{r warning=FALSE}
+############## BIVARIADO - variables demograficas
+
+############ ci_pv
+var = "ci_pv"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+bin=bin_unique(df_tr,var)
+bin=c(0.0275,0.04,0.05,0.065)
+# bin=seq(0.025,0.11,0.0025)
+# bin=seq(0,0.3,0.05)
+writeLines(var)
+x_biv=iv_num_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+x_biv[[3]]
+
+# plot
+# tm_mat_num(x_biv[[1]],df_tr)
+# tm_mat_num(x_biv[[2]],df_ts)
+
+# writeLines('\nTablas:')
+# table(x_biv[[1]],df_tr[,'Malo_dm'],useNA = "ifany")
+# table(x_biv[[2]],df_ts[,'Malo_dm'],useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ ci
+var = "ci"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+bin=bin_unique(df_tr,var)
+bin=c(1500,2380)
+bin=seq(0,6000,1000)
+writeLines(var)
+x_biv=iv_num_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+x_biv[[3]]
+
+# plot
+# tm_mat_num(x_biv[[1]],df_tr)
+# tm_mat_num(x_biv[[2]],df_ts)
+
+# writeLines('\nTablas:')
+# table(x_biv[[1]],df_tr[,'Malo_dm'],useNA = "ifany")
+# table(x_biv[[2]],df_ts[,'Malo_dm'],useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ pv
+var = "pv"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+bin=bin_unique(df_tr,var)
+bin=c(38000,46000)
+# bin=c(43000,50000)
+writeLines(var)
+x_biv=iv_num_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+x_biv[[3]]
+
+# plot
+# tm_mat_num(x_biv[[1]],df_tr)
+# tm_mat_num(x_biv[[2]],df_ts)
+
+# writeLines('\nTablas:')
+# table(x_biv[[1]],df_tr[,'Malo_dm'],useNA = "ifany")
+# table(x_biv[[2]],df_ts[,'Malo_dm'],useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ zona
+var="zona"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('zona_a')
+B=c('zona_b')
+C=c('zona_c')
+D=c('zona_d')
+E=c('otros')
+
+bin=NULL
+# bin<-list(A,B,C,D,E)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ nse
+var="nse"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('AB')
+B=c('C','otros')
+C=c('otros')
+D=c('zona_d')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ edad
+var = "edad"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+bin=bin_unique(df_tr,var)
+bin=c(31,58)
+writeLines(var)
+x_biv=iv_num_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+x_biv[[3]]
+
+# plot
+# tm_mat_num(x_biv[[1]],df_tr)
+# tm_mat_num(x_biv[[2]],df_ts)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'],useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'],useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ civil
+var="civil"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('Casado','Conviviente')
+B=c('Divorciado','Soltero','Viudo')
+C=c('otros')
+D=c('zona_d')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ perfil
+var="perfil"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('Taxista propietario')
+B=c('Taxista palanca')
+C=c('otros')
+D=c('zona_d')
+E=c('otros')
+
+bin=NULL
+bin<-list(A)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ vivienda
+var="vivienda"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('ALQUILADO','')
+B=c('FAMILIAR')
+C=c('PROPIO')
+D=c('zona_d')
+E=c('otros')
+
+bin=NULL
+bin<-list(B,C,A)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ educacion
+var="educacion"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('','Primaria completa','Primaria incompleta','Secundaria completa','Secundaria incompleta')
+B=c('Superior tecnico completo','Superior tecnico incompleto','Superior universitario completo','Superior universitario incompleto',
+    'Post-grado','Post-grado completo','Post-grado incompleto')
+C=c('PROPIO')
+D=c('zona_d')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+
+
+
+
+```{r warning=FALSE}
+############## BIVARIADO - variables sistema financiero
+
+############ linea_por_uso_max1m3_max4m12
+var="linea_por_uso_max1m3_max4m12"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('1. Menor linea_por_uso')
+B=c('2. Igual linea_por_uso','3. Mayor linea_por_uso')
+C=c('4. NA')
+D=c('zona_d')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B,C)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ frec_calificacion_0_1m12
+var = "frec_calificacion_0_1m12"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+bin=bin_unique(df_tr,var)
+bin=c(4,7)
+writeLines(var)
+x_biv=iv_num_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+x_biv[[3]]
+
+# plot
+# tm_mat_num(x_biv[[1]],df_tr)
+# tm_mat_num(x_biv[[2]],df_ts)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'],useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'],useNA = "ifany")
+
+bin=bin_unique(df_tr,var)
+bin=c(0,2,4,6,9,11)
+# bin=c(4,7)
+iv_num_2_altyx(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)[[1]][[1]]
+iv_num_2_altyx(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)[[2]][[1]]
+```
+
+```{r warning=FALSE}
+############ linea_por_uso_max1m6_max7m12
+var="linea_por_uso_max1m6_max7m12"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('1. Menor linea_por_uso')
+B=c('2. Igual linea_por_uso','3. Mayor linea_por_uso')
+C=c('4. NA')
+D=c('zona_d')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B,C)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ calificacion_max1m3_max4m12
+var="calificacion_max1m3_max4m12"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('1. Normal','3. Menor Calificacion')
+B=c('4. Mayor Calificacion','2. CPP Perdida')
+C=c('5. NA')
+D=c('5. NA')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B,C)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ mora_max1m3_max4m12
+var="mora_max1m3_max4m12"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('1. Mora 0')
+B=c('2. Menor mora')
+C=c('3. Igual mora','4. Mayor mora')
+D=c('5. NA')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B,C,D)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ linea_usada_max1m6_max7m12
+var="linea_usada_max1m6_max7m12"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('1. Menor linea_usada')
+B=c('2. Igual linea_usada','3. Mayor linea_usada')
+C=c('4. NA')
+D=c('5. NA')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B,C)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ saldo_mora0_min1m6
+var = "saldo_mora0_min1m6"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+bin=bin_unique(df_tr,var)
+bin=c(0)
+writeLines(var)
+x_biv=iv_num_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+x_biv[[3]]
+
+# plot
+# tm_mat_num(x_biv[[1]],df_tr)
+# tm_mat_num(x_biv[[2]],df_ts)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'],useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'],useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ saldo_por_mora0_min1m6
+var = "saldo_por_mora0_min1m6"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+bin=bin_unique(df_tr,var)
+bin=c(0.3)
+writeLines(var)
+x_biv=iv_num_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+x_biv[[3]]
+
+# plot
+# tm_mat_num(x_biv[[1]],df_tr)
+# tm_mat_num(x_biv[[2]],df_ts)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'],useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'],useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ linea_total_max1m6_max7m12
+var="linea_total_max1m6_max7m12"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('1. Menor linea_total')
+B=c('2. Igual linea_total','3. Mayor linea_total')
+C=c('4. NA')
+D=c('5. NA')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B,C)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ linea_activa_max1m3_max4m12
+var="linea_activa_max1m3_max4m12"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('1. Menor linea_activa')
+B=c('2. Igual linea_activa','3. Mayor linea_activa')
+C=c('4. NA')
+D=c('5. NA')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B,C)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ linea_total_max1m3_max4m12
+var="linea_total_max1m3_max4m12"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('2. Igual linea_total','1. Menor linea_total')
+B=c('3. Mayor linea_total')
+C=c('4. NA')
+D=c('5. NA')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B,C)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ linea_usada_max1m3_max4m12
+var="linea_usada_max1m3_max4m12"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('1. Menor linea_usada')
+B=c('2. Igual linea_usada','3. Mayor linea_usada')
+C=c('4. NA')
+D=c('5. NA')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B,C)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ mora_1m
+var = "mora_1m"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+bin=bin_unique(df_tr,var)
+bin=seq(0,120,30)
+bin=c(0)
+writeLines(var)
+x_biv=iv_num_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+x_biv[[3]]
+
+# plot
+# tm_mat_num(x_biv[[1]],df_tr)
+# tm_mat_num(x_biv[[2]],df_ts)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'],useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'],useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ linea_activa_max1m6_max7m12
+var="linea_activa_max1m6_max7m12"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('1. Menor linea_activa')
+B=c('2. Igual linea_activa','3. Mayor linea_activa')
+C=c('4. NA')
+D=c('5. NA')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B,C)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ frec_mora_0_1m12
+var = "frec_mora_0_1m12"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+bin=bin_unique(df_tr,var)
+bin=c(0:11)
+bin=c(6,9)
+writeLines(var)
+x_biv=iv_num_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+x_biv[[3]]
+
+# plot
+# tm_mat_num(x_biv[[1]],df_tr)
+# tm_mat_num(x_biv[[2]],df_ts)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'],useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'],useNA = "ifany")
+```
+
+```{r warning=FALSE}
+############ calificacion_max1m6_max7m12
+var="calificacion_max1m6_max7m12"
+df_tr=df_taxi_train
+df_ts=df_taxi_test
+
+# cortes o grupos: se pueden añadir hasta 7 grupos.
+A=c('1. Normal')
+B=c('3. Menor Calificacion','4. Mayor Calificacion','2. CPP Perdida')
+C=c('2. CPP Perdida')
+D=c('5. NA')
+E=c('otros')
+
+bin=NULL
+bin<-list(A,B,D)
+writeLines(var)
+x_biv=iv_cat_2(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)
+
+writeLines('\nTablas:')
+table(x_biv[[1]],df_tr[,'Malo_dm'], useNA = "ifany")
+table(x_biv[[2]],df_ts[,'Malo_dm'], useNA = "ifany")
+```
+
+
+
+
+
+```{r}
+##########################################################################################################################
+```
+
+```{r}
+###############################
+######   VARIABLES WOE
+###############################
+# 1 (ESTRATEGIA)
+# train
+df_taxi_train$cm_saldo_1m_woe=ifelse(df_taxi_train$cm<=1500&is.na(df_taxi_train$saldo_1m),0.1925,ifelse(df_taxi_train$cm<=1500&df_taxi_train$saldo_1m>0,0.4054,ifelse(df_taxi_train$cm>1500&is.na(df_taxi_train$saldo_1m),-0.0346,ifelse(df_taxi_train$cm>1500&df_taxi_train$saldo_1m>0,-0.1786,0))))
+# test
+df_taxi_test$cm_saldo_1m_woe=ifelse(df_taxi_test$cm<=1500&is.na(df_taxi_test$saldo_1m),0.2975,ifelse(df_taxi_test$cm<=1500&df_taxi_test$saldo_1m>0,0.2493,ifelse(df_taxi_test$cm>1500&is.na(df_taxi_test$saldo_1m),0.0117,ifelse(df_taxi_test$cm>1500&df_taxi_test$saldo_1m>0,-0.0577,0))))
+# 2
+# train
+df_taxi_train$pv_ci_woe=ifelse(df_taxi_train$pv<=38000&df_taxi_train$ci<=4000,-0.2783,ifelse(df_taxi_train$pv<=38000&df_taxi_train$ci<=5000,-0.0506,ifelse(df_taxi_train$pv<=38000&df_taxi_train$ci>5000,1.5933,ifelse(df_taxi_train$pv<=46000&df_taxi_train$ci<=6000,0.2812,ifelse(df_taxi_train$pv<=46000&df_taxi_train$ci>6000,0.4900,ifelse(df_taxi_train$pv>46000&df_taxi_train$ci<=4000,-0.3472,ifelse(df_taxi_train$pv>46000&df_taxi_train$ci<=6000,-0.0866,ifelse(df_taxi_train$pv>46000&df_taxi_train$ci>6000,0.1280,0))))))))
+# test
+df_taxi_test$pv_ci_woe=ifelse(df_taxi_test$pv<=38000&df_taxi_test$ci<=4000,-0.2783,ifelse(df_taxi_test$pv<=38000&df_taxi_test$ci<=5000,-0.0506,ifelse(df_taxi_test$pv<=38000&df_taxi_test$ci>5000,1.5933,ifelse(df_taxi_test$pv<=46000&df_taxi_test$ci<=6000,0.2812,ifelse(df_taxi_test$pv<=46000&df_taxi_test$ci>6000,0.4900,ifelse(df_taxi_test$pv>46000&df_taxi_test$ci<=4000,-0.3472,ifelse(df_taxi_test$pv>46000&df_taxi_test$ci<=6000,-0.0866,ifelse(df_taxi_test$pv>46000&df_taxi_test$ci>6000,0.1280,0))))))))
+# 3 (DEMOGRAFICAS)
+# train
+df_taxi_train$pv_woe=ifelse(df_taxi_train$pv<=38000,0.5566,ifelse(df_taxi_train$pv<=45000,0.3919,ifelse(df_taxi_train$pv>45000,-0.0789,0)))
+# test
+df_taxi_test$pv_woe=ifelse(df_taxi_test$pv<=38000,0.5566,ifelse(df_taxi_test$pv<=45000,0.3919,ifelse(df_taxi_test$pv>45000,-0.0789,0)))
+# 4 (RCC)
+# train
+df_taxi_train$frec_calificacion_0_1m12_woe=ifelse(df_taxi_train$frec_calificacion_0_1m12<=4,-0.0936,ifelse(df_taxi_train$frec_calificacion_0_1m12<=7,-0.0068,ifelse(df_taxi_train$frec_calificacion_0_1m12>7,0.3336,0)))
+# test
+df_taxi_test$frec_calificacion_0_1m12_woe=ifelse(df_taxi_test$frec_calificacion_0_1m12<=4,-0.0936,ifelse(df_taxi_test$frec_calificacion_0_1m12<=7,-0.0068,ifelse(df_taxi_test$frec_calificacion_0_1m12>7,0.3336,0)))
+# 5
+A=c('1. Menor linea_por_uso');B=c('2. Igual linea_por_uso','3. Mayor linea_por_uso');C=c('4. NA')
+# train
+df_taxi_train$linea_por_uso_max1m6_max7m12_woe=ifelse(df_taxi_train$linea_por_uso_max1m6_max7m12%in%A,0.4702,ifelse(df_taxi_train$linea_por_uso_max1m6_max7m12%in%B,0.3199,ifelse(df_taxi_train$linea_por_uso_max1m6_max7m12%in%C,-0.0890,0)))
+# test
+df_taxi_test$linea_por_uso_max1m6_max7m12_woe=ifelse(df_taxi_test$linea_por_uso_max1m6_max7m12%in%A,0.4702,ifelse(df_taxi_test$linea_por_uso_max1m6_max7m12%in%B,0.3199,ifelse(df_taxi_test$linea_por_uso_max1m6_max7m12%in%C,-0.0890,0)))
+# 6
+A=c('1. Normal','3. Menor Calificacion');B=c('4. Mayor Calificacion','2. CPP Perdida');C=c('5. NA')
+# train
+df_taxi_train$calificacion_max1m3_max4m12_woe=ifelse(df_taxi_train$calificacion_max1m3_max4m12%in%A,0.2642,ifelse(df_taxi_train$calificacion_max1m3_max4m12%in%B,-0.1847,ifelse(df_taxi_train$calificacion_max1m3_max4m12%in%C,0.0110,0)))
+# test
+df_taxi_test$calificacion_max1m3_max4m12_woe=ifelse(df_taxi_test$calificacion_max1m3_max4m12%in%A,0.2642,ifelse(df_taxi_test$calificacion_max1m3_max4m12%in%B,-0.1847,ifelse(df_taxi_test$calificacion_max1m3_max4m12%in%C,0.0110,0)))
+# 7
+A=c('1. Mora 0');B=c('2. Menor mora');C=c('3. Igual mora','4. Mayor mora');D=c('5. NA')
+# train
+df_taxi_train$mora_max1m3_max4m12_woe=ifelse(df_taxi_train$mora_max1m3_max4m12%in%A,0.3682,ifelse(df_taxi_train$mora_max1m3_max4m12%in%B,0.2124,ifelse(df_taxi_train$mora_max1m3_max4m12%in%C,-0.1980,ifelse(df_taxi_train$mora_max1m3_max4m12%in%D,0.0110,0))))
+# test
+df_taxi_test$mora_max1m3_max4m12_woe=ifelse(df_taxi_test$mora_max1m3_max4m12%in%A,0.3682,ifelse(df_taxi_test$mora_max1m3_max4m12%in%B,0.2124,ifelse(df_taxi_test$mora_max1m3_max4m12%in%C,-0.1980,ifelse(df_taxi_test$mora_max1m3_max4m12%in%D,0.0110,0))))
+# 8
+# train
+df_taxi_train$saldo_por_mora0_min1m6_woe=ifelse(is.na(df_taxi_train$saldo_por_mora0_min1m6),0.0805,ifelse(df_taxi_train$saldo_por_mora0_min1m6<=0.3,-0.2137,ifelse(df_taxi_train$saldo_por_mora0_min1m6>0.3,0.2287,0)))
+# test
+df_taxi_test$saldo_por_mora0_min1m6_woe=ifelse(is.na(df_taxi_test$saldo_por_mora0_min1m6),0.0805,ifelse(df_taxi_test$saldo_por_mora0_min1m6<=0.3,-0.2137,ifelse(df_taxi_test$saldo_por_mora0_min1m6>0.3,0.2287,0)))
+# 9
+# train
+df_taxi_train$mora_1m_woe=ifelse(is.na(df_taxi_train$mora_1m),0.0369,ifelse(df_taxi_train$mora_1m<=0,0.2586,ifelse(df_taxi_train$mora_1m>0,-0.2158,0)))
+# test
+df_taxi_test$mora_1m_woe=ifelse(is.na(df_taxi_test$mora_1m),0.0369,ifelse(df_taxi_test$mora_1m<=0,0.2586,ifelse(df_taxi_test$mora_1m>0,-0.2158,0)))
+# 10
+# train
+df_taxi_train$frec_mora_0_1m12_woe=ifelse(df_taxi_train$frec_mora_0_1m12<=6,-0.0771,ifelse(df_taxi_train$frec_mora_0_1m12<=9,0.1993,ifelse(df_taxi_train$frec_mora_0_1m12>0,0.3657,0)))
+# test
+df_taxi_test$frec_mora_0_1m12_woe=ifelse(df_taxi_test$frec_mora_0_1m12<=6,-0.0771,ifelse(df_taxi_test$frec_mora_0_1m12<=9,0.1993,ifelse(df_taxi_test$frec_mora_0_1m12>0,0.3657,0)))
+
+
+```
+
+```{r}
+# colnames(df_taxi_train)
+```
+
+```{r}
+#####################################
+######   CORRELACION VARIABLES WOE
+#####################################
+
+base_woe_taxi=df_taxi_train[,c(215:216)]
+
+matriz_cor=cor(base_woe_taxi)
+
+write.table(matriz_cor,'D:/GIAP/Giordan/Acceso/Tareas/taxi/score_20_07/df_taxi_train_matriz_correlacion.csv', sep=',')
+```
+
+```{r}
+# str(base_woe_taxi)
+```
+
+```{r}
+#####################################
+######   STEPWISE BOTH
+#####################################
+library(MASS)
+
+######### MODELO 1
+
+formula_logit1 = as.formula(Malo_dm ~ 
+
++ cm_saldo_1m_woe
++ pv_ci_woe
++pv_woe
++frec_calificacion_0_1m12_woe
++linea_por_uso_max1m6_max7m12_woe
++calificacion_max1m3_max4m12_woe
++mora_max1m3_max4m12_woe
++saldo_por_mora0_min1m6_woe
++mora_1m_woe
++frec_mora_0_1m12_woe
+)
+
+modelo1 <- glm(formula_logit1, data=df_taxi_train, family = "binomial")
+
+step_modelo1 <- stepAIC(modelo1, direction = "both", trace = FALSE)
+
+summary(step_modelo1)
+```
+
+```{r}
+########## Gini 1
+z2_taxi_train=predict(modelo1,data=df_taxi_train)
+p2_taxi_train=1/(1+exp(-z2_taxi_train))
+
+mean(df_taxi_train$tm_dm)
+mean(p2_taxi_train)
+gini1=rcorr.cens(p2_taxi_train,df_taxi_train$tm_dm)[2]
+roc1=(gini1+1)/2
+gini1
+roc1
+```
+
+```{r}
+########## Wald 1
+regTermTest(modelo1, ~ perfil_woe , method = "Wald")[3]
+regTermTest(modelo1, ~ edad_woe , method = "Wald")[3]
+regTermTest(modelo1, ~ calificacion_1m_woe, method = "Wald")[3]
+regTermTest(modelo1, ~ por_cal1_max1m12_woe, method = "Wald")[3]
+```
+
+```{r}
+######### MODELO 2
+
+formula_logit2 = as.formula(Malo_dm ~
++cm_saldo_1m_woe
++pv_ci_woe
++pv_woe
++frec_calificacion_0_1m12_woe
++linea_por_uso_max1m6_max7m12_woe
++calificacion_max1m3_max4m12_woe
++mora_max1m3_max4m12_woe
++saldo_por_mora0_min1m6_woe
++mora_1m_woe
++frec_mora_0_1m12_woe
+)
+
+modelo2 <- glm(formula_logit2, data=df_taxi_train, family = "binomial")
+
+summary(modelo2)
+```
+
+```{r}
+########## Gini 2
+z2_taxi_train=predict(modelo2,data=df_taxi_train)
+p2_taxi_train=1/(1+exp(-z2_taxi_train))
+
+mean(df_taxi_train$tm_dm)
+mean(p2_taxi_train)
+gini2=rcorr.cens(p2_taxi_train,df_taxi_train$tm_dm)[2]
+roc2=(gini2+1)/2
+gini2
+roc2
+```
+
+```{r}
+########## Wald 2
+regTermTest(modelo2, ~ frec_mora_0_1m12_woe, method = "Wald")[3]
+regTermTest(modelo2, ~ linea_nousada_min1m3_woe, method = "Wald")[3]
+regTermTest(modelo2, ~ mora_max1m6_woe, method = "Wald")[3]
+regTermTest(modelo2, ~ saldo_usd_1m_max2m12_woe, method = "Wald")[3]
+regTermTest(modelo2, ~ saldo_max1m3_max4m12_woe, method = "Wald")[3]
+regTermTest(modelo2, ~ educacion_woe, method = "Wald")[3]
+regTermTest(modelo2, ~ edad_woe, method = "Wald")[3]
+```
+
+```{r}
+######### MODELO 3
+
+formula_logit3 = as.formula(Malo_dm ~ 
+# +cm_saldo_1m_woe
++pv_ci_woe
+# +pv_woe
+# +frec_calificacion_0_1m12_woe
++linea_por_uso_max1m6_max7m12_woe
+# +calificacion_max1m3_max4m12_woe
+# +mora_max1m3_max4m12_woe
++saldo_por_mora0_min1m6_woe
+# +mora_1m_woe
+# +frec_mora_0_1m12_woe
+)
+
+modelo3 <- glm(formula_logit3, data=df_taxi_train, family = "binomial")
+
+summary(modelo3)
+```
+
+```{r}
+########## Gini 3
+z3_taxi_train=predict(modelo3,data=df_taxi_train)
+p3_taxi_train=1/(1+exp(-z3_taxi_train))
+
+mean(df_taxi_train$tm_dm)
+mean(p3_taxi_train)
+gini3=rcorr.cens(p3_taxi_train,df_taxi_train$tm_dm)[2]
+roc3=(gini3+1)/2
+gini3
+roc3
+```
+
+```{r}
+########## Wald 3
+regTermTest(modelo3, ~ frec_mora_0_1m12_woe, method = "Wald")[3]
+regTermTest(modelo3, ~ linea_nousada_min1m3_woe, method = "Wald")[3]
+regTermTest(modelo3, ~ mora_max1m6_woe, method = "Wald")[3]
+regTermTest(modelo3, ~ saldo_usd_1m_max2m12_woe, method = "Wald")[3]
+regTermTest(modelo3, ~ saldo_max1m3_max4m12_woe, method = "Wald")
+regTermTest(modelo3, ~ can_emp_max1m3_max4m12_woe, method = "Wald")[3][3]
+regTermTest(modelo3, ~ educacion_woe, method = "Wald")[3]
+regTermTest(modelo3, ~ estado_civil_woe, method = "Wald")[3]
+```
+
+```{r}
+######### MODELO 4
+
+formula_logit4 = as.formula(Malo_prima ~ 
++frec_mora_0_1m12_woe
+# +linea_nousada_min1m3_woe
+# +linea_activa_max1m12_woe
+# +linea_nousada_min1m6_woe
+# +linea_activa_max1m3_woe
+# +linea_total_max1m3_woe
+# +linea_total_max1m12_woe
+# +linea_total_1m_woe
+# +linea_activa_max1m6_woe
+# +linea_total_max1m6_woe
+# +linea_activa_1m_woe
+# +frec_por_cal0_100_1m12_woe
+# +frec_calificacion_0_1m12_woe
+# +mora_max1m6_max7m12_woe
+# +mora_max1m6_woe
++educacion_woe
++saldo_usd_1m_max2m12_woe
+# +linea_por_uso_max1m3_max4m12_woe
+# +mora_max1m3_max4m12_woe
++saldo_max1m3_max4m12_woe
++mora_max1m12_woe
+# +linea_por_uso_1m_max2m12_woe
+# +linea_usada_max1m3_max4m12_woe
+# +saldo_usd_max1m3_max4m12_woe
+# +linea_usada_1m_max2m12_woe
+# +linea_total_max1m6_max7m12_woe
+# +linea_activa_max1m6_max7m12_woe
+# +linea_por_uso_max1m6_max7m12_woe
+# +ingreso_neto_woe
++estado_civil_woe
+# +edad_woe
++linea_por_uso_1m_woe
+# +linea_nousada_min1m12_woe
+# +linea_por_uso_max1m12_woe
+# +saldo_por_mora0_min1m12_woe
+# +rec_mora_0_1m12_woe
+# +expcred_1m12_woe
+# +disp_efectivo_1m_max2m12_woe
+# +mora_1m_max2m12_woe
+# +mora_1m_woe
++can_emp_max1m3_max4m12_woe
+# +mora_max1m3_woe
+# +disp_efectivo_max1m3_max4m12_woe
+# +can_emp_1m_max2m12_woe
+# +por_cal0_min1m6_min7m12_woe
+# +por_cal1_max1m12_woe
+# +saldo_1m_max2m12_woe
+# +calificacion_max1m6_max7m12_woe
+)
+
+modelo4 <- glm(formula_logit4, data=df_taxi_train, family = "binomial")
+
+summary(modelo4)
+```
+
+```{r}
+########## Gini 4
+z4_taxi_train=predict(modelo4,data=df_taxi_train)
+p4_taxi_train=1/(1+exp(-z4_taxi_train))
+
+mean(df_taxi_train$tm_prima)
+mean(p4_taxi_train)
+gini4=rcorr.cens(p4_taxi_train,df_taxi_train$tm_prima)[2]
+roc4=(gini4+1)/2
+gini4
+roc4
+```
+
+```{r}
+########## Wald 4
+regTermTest(modelo4, ~ frec_mora_0_1m12_woe, method = "Wald")[3]
+regTermTest(modelo4, ~ saldo_usd_1m_max2m12_woe, method = "Wald")[3]
+regTermTest(modelo4, ~ saldo_max1m3_max4m12_woe, method = "Wald")[3]
+regTermTest(modelo4, ~ mora_max1m12_woe, method = "Wald")[3]
+regTermTest(modelo4, ~ linea_por_uso_1m_woe, method = "Wald")[3]
+regTermTest(modelo4, ~ can_emp_max1m3_max4m12_woe, method = "Wald")[3]
+regTermTest(modelo4, ~ educacion_woe, method = "Wald")[3]
+regTermTest(modelo4, ~ estado_civil_woe, method = "Wald")[3]
+```
+
+```{r}
+######### MODELO 5
+
+formula_logit5 = as.formula(Malo_prima ~ 
+# +frec_mora_0_1m12_woe
+# +linea_nousada_min1m3_woe
+# +linea_activa_max1m12_woe
+# +linea_nousada_min1m6_woe
+# +linea_activa_max1m3_woe
+# +linea_total_max1m3_woe
+# +linea_total_max1m12_woe
+# +linea_total_1m_woe
+# +linea_activa_max1m6_woe
+# +linea_total_max1m6_woe
+# +linea_activa_1m_woe
++frec_por_cal0_100_1m12_woe
+# +frec_calificacion_0_1m12_woe
+# +mora_max1m6_max7m12_woe
+# +mora_max1m6_woe
++educacion_woe
++saldo_usd_1m_max2m12_woe
+# +linea_por_uso_max1m3_max4m12_woe
+# +mora_max1m3_max4m12_woe
++saldo_max1m3_max4m12_woe
++mora_max1m12_woe
+# +linea_por_uso_1m_max2m12_woe
+# +linea_usada_max1m3_max4m12_woe
+# +saldo_usd_max1m3_max4m12_woe
+# +linea_usada_1m_max2m12_woe
+# +linea_total_max1m6_max7m12_woe
+# +linea_activa_max1m6_max7m12_woe
+# +linea_por_uso_max1m6_max7m12_woe
+# +ingreso_neto_woe
++estado_civil_woe
++edad_woe
++linea_por_uso_1m_woe
+# +linea_nousada_min1m12_woe
+# +linea_por_uso_max1m12_woe
+# +saldo_por_mora0_min1m12_woe
+# +rec_mora_0_1m12_woe
+# +expcred_1m12_woe
+# +disp_efectivo_1m_max2m12_woe
+# +mora_1m_max2m12_woe
+# +mora_1m_woe
+# +can_emp_max1m3_max4m12_woe
+# +mora_max1m3_woe
+# +disp_efectivo_max1m3_max4m12_woe
++can_emp_1m_max2m12_woe
+# +por_cal0_min1m6_min7m12_woe
+# +por_cal1_max1m12_woe
+# +saldo_1m_max2m12_woe
+# +calificacion_max1m6_max7m12_woe
+)
+
+modelo5 <- glm(formula_logit5, data=df_taxi_train, family = "binomial")
+
+summary(modelo5)
+```
+
+```{r}
+########## Gini 5
+z5_taxi_train=predict(modelo5,data=df_taxi_train)
+p5_taxi_train=1/(1+exp(-z5_taxi_train))
+
+mean(df_taxi_train$tm_prima)
+mean(p5_taxi_train)
+gini5=rcorr.cens(p5_taxi_train,df_taxi_train$tm_prima)[2]
+roc5=(gini5+1)/2
+gini5
+roc5
+```
+
+```{r}
+########## Wald 5
+regTermTest(modelo5, ~ frec_por_cal0_100_1m12_woe, method = "Wald")[3]
+regTermTest(modelo5, ~ saldo_usd_1m_max2m12_woe, method = "Wald")[3]
+regTermTest(modelo5, ~ saldo_max1m3_max4m12_woe, method = "Wald")[3]
+regTermTest(modelo5, ~ mora_max1m12_woe, method = "Wald")[3]
+regTermTest(modelo5, ~ linea_por_uso_1m_woe, method = "Wald")[3]
+regTermTest(modelo5, ~ can_emp_1m_max2m12_woe, method = "Wald")[3]
+regTermTest(modelo5, ~ educacion_woe, method = "Wald")[3]
+regTermTest(modelo5, ~ estado_civil_woe, method = "Wald")[3]
+regTermTest(modelo5, ~ edad_woe, method = "Wald")[3]
+```
+
+```{r}
+################### Pruebas de significancia
+
+# Significancia
+# deviance
+modelo5b=glm(Malo_dm~1,family = binomial,data=df_taxi_train)
+anova(modelo5)
+anova(modelo5b,modelo5, test = 'Chisq')
+```
+
+```{r}
+################### Pruebas de significancia
+# Wald TEst
+wald.test(b = coef(modelo5), Sigma = vcov(modelo5), Terms = 2:10)
+```
+
+```{r}
+################### Bondad de Ajuste
+#Hosmer-Lemeshow
+# HLgof.test(fit = fitted(modelo5), obs =df_taxi_train$Malo_prima)
+
+h1=hoslem.test(df_taxi_train$tm_prima, fitted(modelo5), g=10)
+cbind(h1$observed,h1$expected)
+
+hosmerlem <- function (y, yhat, g = 10)
+{
+  cutyhat <- cut(yhat, 
+                 breaks = quantile(yhat, probs = seq(0, 1, 1/g)), 
+                 include.lowest = T
+                 )
+  obs     <- xtabs( cbind(1 - y, y) ~ cutyhat )
+  expect  <- xtabs( cbind(1 - yhat, yhat) ~ cutyhat )
+  chisq   <- sum( (obs - expect) ^2/expect )
+  P       <- 1 - pchisq(chisq, g-1)
+  c  ("X^2" = chisq, Df = g-1, "P(>Chi)" = P)
+}
+
+hosmerlem(y=df_taxi_train$tm_prima, yhat=fitted(modelo5))
+```
+
+```{r}
+colnames(df_taxi_train)
+```
+
+```{r}
+dim(df_taxi_train)
+```
+
+```{r}
+####################### VALIDACION CRUZADA
+
+################# Validacion K-fold
+
+##### Validacion K folds ########
+### semillas
+n=dim(df_taxi_train)[1]
+n
+
+for( k in 1:10)
+{
+set.seed(k)
+
+muestra_LDCons=sample(1:10,n,replace=T)
+
+df_taxi_train_k= cbind(df_taxi_train,muestra_LDCons)
+
+muestra_LDCons_k= rep(0,n)
+betas_LDCons=matrix(0,10,10)
+ginis_LDCons=matrix(0,10,2)
+
+
+for( j in 1:10 )
+{
+  for ( i in 1:n )
+
+  muestra_LDCons_k[i]=ifelse(df_taxi_train_k[i,263]==j, 'Val','Ent')
+
+  Base_LDCons_k=cbind(df_taxi_train_k,muestra_LDCons_k)
+  Modelo_LDCons_k= glm(Malo_prima ~ frec_por_cal0_100_1m12_woe+saldo_usd_1m_max2m12_woe+saldo_max1m3_max4m12_woe+mora_max1m12_woe+linea_por_uso_1m_woe+can_emp_1m_max2m12_woe+educacion_woe+estado_civil_woe+edad_woe,data=subset(Base_LDCons_k, muestra_LDCons_k=='Ent')[,-c(263,264)], family = binomial )
+  betas_LDCons[j,]= Modelo_LDCons_k$coeff
+
+  pr_Ent=predict( Modelo_LDCons_k,data=subset(Base_LDCons_k, muestra_LDCons_k=='Ent')[,-c(263,264)],type='resp')
+
+  pr_Val=predict( Modelo_LDCons_k,newdata =subset(Base_LDCons_k, muestra_LDCons_k=='Val')[,-c(263,264)],type='resp')
+
+  ginis_LDCons[j,1]=rcorr.cens(pr_Ent,subset(Base_LDCons_k, muestra_LDCons_k=='Ent')$Malo_prima)[2]
+
+  ginis_LDCons[j,2]=rcorr.cens(pr_Val,subset(Base_LDCons_k, muestra_LDCons_k=='Val')$Malo_prima)[2]
+
+ j=j+1
+}
+
+print(ginis_LDCons)
+print(betas_LDCons)
+
+}
+```
+
+```{r}
+######### MODELO 6
+
+formula_logit6 = as.formula(Malo_prima ~ 
+# +frec_mora_0_1m12_woe
+# +linea_nousada_min1m3_woe
++linea_activa_max1m12_woe
+# +linea_nousada_min1m6_woe
+# +linea_activa_max1m3_woe
+# +linea_total_max1m3_woe
+# +linea_total_max1m12_woe
+# +linea_total_1m_woe
+# +linea_activa_max1m6_woe
+# +linea_total_max1m6_woe
+# +linea_activa_1m_woe
++frec_por_cal0_100_1m12_woe
+# +frec_calificacion_0_1m12_woe
+# +mora_max1m6_max7m12_woe
+# +mora_max1m6_woe
++educacion_woe
+# +saldo_usd_1m_max2m12_woe
+# +linea_por_uso_max1m3_max4m12_woe
+# +mora_max1m3_max4m12_woe
++saldo_max1m3_max4m12_woe
++mora_max1m12_woe
+# +linea_por_uso_1m_max2m12_woe
+# +linea_usada_max1m3_max4m12_woe
+# +saldo_usd_max1m3_max4m12_woe
+# +linea_usada_1m_max2m12_woe
+# +linea_total_max1m6_max7m12_woe
+# +linea_activa_max1m6_max7m12_woe
+# +linea_por_uso_max1m6_max7m12_woe
+# +ingreso_neto_woe
++estado_civil_woe
++edad_woe
++linea_por_uso_1m_woe
+# +linea_nousada_min1m12_woe
+# +linea_por_uso_max1m12_woe
+# +saldo_por_mora0_min1m12_woe
+# +rec_mora_0_1m12_woe
+# +expcred_1m12_woe
+# +disp_efectivo_1m_max2m12_woe
+# +mora_1m_max2m12_woe
+# +mora_1m_woe
+# +can_emp_max1m3_max4m12_woe
+# +mora_max1m3_woe
+# +disp_efectivo_max1m3_max4m12_woe
++can_emp_1m_max2m12_woe
+# +por_cal0_min1m6_min7m12_woe
+# +por_cal1_max1m12_woe
+# +saldo_1m_max2m12_woe
+# +calificacion_max1m6_max7m12_woe
+)
+
+modelo6 <- glm(formula_logit6, data=df_taxi_train, family = "binomial")
+
+summary(modelo6)
+```
+
+```{r}
+########## Gini 6
+z6_taxi_train=predict(modelo6,data=df_taxi_train)
+p6_taxi_train=1/(1+exp(-z6_taxi_train))
+
+mean(df_taxi_train$tm_prima)
+mean(p6_taxi_train)
+gini6=rcorr.cens(p6_taxi_train,df_taxi_train$tm_prima)[2]
+roc6=(gini6+1)/2
+gini6
+roc6
+```
+
+```{r}
+########## Wald 6
+regTermTest(modelo6, ~ frec_por_cal0_100_1m12_woe, method = "Wald")[3]
+regTermTest(modelo6, ~ saldo_usd_1m_max2m12_woe, method = "Wald")[3]
+regTermTest(modelo6, ~ saldo_max1m3_max4m12_woe, method = "Wald")[3]
+regTermTest(modelo6, ~ mora_max1m12_woe, method = "Wald")[3]
+regTermTest(modelo6, ~ linea_por_uso_1m_woe, method = "Wald")[3]
+regTermTest(modelo6, ~ can_emp_1m_max2m12_woe, method = "Wald")[3]
+regTermTest(modelo6, ~ educacion_woe, method = "Wald")[3]
+regTermTest(modelo6, ~ estado_civil_woe, method = "Wald")[3]
+regTermTest(modelo6, ~ edad_woe, method = "Wald")[3]
+```
+
+```{r}
+colnames(df_taxi_train)
+```
+
+```{r}
+#####################################
+######   CORRELACION WOE FINAL
+#####################################
+base_woe_LDCons_final=df_taxi_train[,c(225,227,238,245,248,258,216,217,215)]
+matriz_cor_final=cor(base_woe_LDCons_final)
+matriz_cor_final
+```
+
+```{r}
+####################################
+############ OODS RIESGOS
+####################################
+
+# p5_taxi_train_biv=cut(p5_taxi_train, breaks = c(-Inf,
+#                                              # quantile(p5_taxi_train,0.05,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.1,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.15,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.2,na.rm = T),
+#                                              quantile(p5_taxi_train,0.25,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.3,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.35,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.4,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.45,na.rm = T),
+#                                              quantile(p5_taxi_train,0.5,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.55,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.6,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.65,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.7,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.75,na.rm = T),
+#                                              quantile(p5_taxi_train,0.8,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.85,na.rm = T),
+#                                              # quantile(p5_taxi_train,0.9,na.rm = T),
+#                                              quantile(p5_taxi_train,0.95,na.rm = T),
+#                                              Inf))
+por_cal1_max1m12_biv=cut(df_taxi_train$por_cal1_max1m12, breaks = c(-Inf,0.178812,0.2428972,0.3535886,0.4810259,Inf))
+round(prop.table(table(p5_taxi_train_biv,df_taxi_train$Malo_prima),1)*100,2)
+table(p5_taxi_train_biv,df_taxi_train$Malo_prima, useNA = "ifany")
+```
+
+```{r}
+quantile(p5_taxi_train,0.25,na.rm = T)
+quantile(p5_taxi_train,0.5,na.rm = T)
+quantile(p5_taxi_train,0.8,na.rm = T)
+quantile(p5_taxi_train,0.95,na.rm = T)
+quantile(p5_taxi_train,1,na.rm = T)
+```
+
+```{r}
+################### base pd_predict
+write.table(cbind(df_taxi_train$tm_prima,p5_taxi_train),'D:/01.Comite_Riesgos/08 Centro de Modelos de Riesgos/002 CREDIT SCORING/NO TRADICIONALES/LD Consumo/2020/02.Febrero/MODELO/df_taxi_p5_taxi_train.csv', sep=',')
+```
+
+```{r}
+###############################
+######   VARIABLES WOE FINAL
+###############################
+### 1
+df_taxi$edad_woe=ifelse(df_taxi$edad<=22,-0.3473,ifelse(df_taxi$edad<=37,-0.0306,ifelse(df_taxi$edad<=44,0.0357,ifelse(df_taxi$edad>44,0.4232,0))))
+### 2
+df_taxi$educacion_woe=ifelse(is.na(df_taxi$educacion),-0.3996,ifelse(df_taxi$educacion%in%c('Sin estudios','Primaria completa','Secundaria incompleta','Secundaria completa'),-0.3996,ifelse(df_taxi$educacion%in%c('Superior tecnico incompleto','Superior tecnico completo'),-0.1535,ifelse(df_taxi$educacion%in%c('Superior universitario incompleto','Superior universitario completo','Postgrado','Postgrado completo'),0.2265,0))))
+### 3
+df_taxi$estado_civil_woe=ifelse(is.na(df_taxi$estado_civil),-0.0591,ifelse(df_taxi$estado_civil%in%c('Casado','Viudo','Divorciado'),0.4083,ifelse(df_taxi$estado_civil%in%c('Soltero','Conviviente'),-0.0591,0)))
+### 4
+df_taxi$ingreso_neto_woe=ifelse(df_taxi$ingreso_neto<=2667,-0.0749,ifelse(df_taxi$ingreso_neto>2667,0.3316,0))
+### 5
+df_taxi$linea_por_uso_max1m6_max7m12_woe=ifelse(is.na(df_taxi$linea_por_uso_max1m6_max7m12),-0.1053,ifelse(df_taxi$linea_por_uso_max1m6_max7m12%in%c('1. Menor linea_por_uso'),0.3090,-0.1053))
+### 6
+df_taxi$linea_activa_max1m6_max7m12_woe=ifelse(is.na(df_taxi$linea_activa_max1m6_max7m12),-0.1594,ifelse(df_taxi$linea_activa_max1m6_max7m12%in%c('3. Mayor linea_activa'),0.2169,-0.1594))
+### 7
+df_taxi$linea_total_max1m6_max7m12_woe=ifelse(is.na(df_taxi$linea_total_max1m6_max7m12),-0.1908,ifelse(df_taxi$linea_total_max1m6_max7m12%in%c('3. Mayor linea_total'),0.2039,-0.1908))
+### 8
+df_taxi$frec_mora_0_1m12_woe=ifelse(df_taxi$frec_mora_0_1m12<=6,-0.5318,ifelse(df_taxi$frec_mora_0_1m12<=9,-0.3485,ifelse(df_taxi$frec_mora_0_1m12<=11,-0.0950,ifelse(df_taxi$frec_mora_0_1m12>11,0.3401,0))))
+### 9
+df_taxi$linea_usada_max1m3_max4m12_woe=ifelse(is.na(df_taxi$linea_usada_max1m3_max4m12),-0.1391,ifelse(df_taxi$linea_usada_max1m3_max4m12%in%c('1. Menor linea_usada'),0.3113,-0.1391))
+### 10
+df_taxi$linea_por_uso_max1m3_max4m12_woe=ifelse(is.na(df_taxi$linea_por_uso_max1m3_max4m12),-0.2064,ifelse(df_taxi$linea_por_uso_max1m3_max4m12%in%c('1. Menor linea_por_uso'),0.2607,-0.2064))
+### 11
+df_taxi$frec_por_cal0_100_1m12_woe=ifelse(df_taxi$frec_por_cal0_100_1m12<=6,-0.4612,ifelse(df_taxi$frec_por_cal0_100_1m12<=10,-0.3368,ifelse(df_taxi$frec_por_cal0_100_1m12<=11,-0.0109,ifelse(df_taxi$frec_por_cal0_100_1m12>11,0.2215,0))))
+### 12
+df_taxi$saldo_usd_max1m3_max4m12_woe=ifelse(is.na(df_taxi$saldo_usd_max1m3_max4m12),-0.0893,ifelse(df_taxi$saldo_usd_max1m3_max4m12%in%c('1. Menor saldo_usd'),0.4652,-0.0893))
+### 13
+df_taxi$saldo_usd_1m_max2m12_woe=ifelse(is.na(df_taxi$saldo_usd_1m_max2m12),-0.1234,ifelse(df_taxi$saldo_usd_1m_max2m12%in%c('1. Menor saldo_usd'),0.4395,-0.1234))
+### 14
+df_taxi$frec_calificacion_0_1m12_woe=ifelse(df_taxi$frec_calificacion_0_1m12<=6,-0.4631,ifelse(df_taxi$frec_calificacion_0_1m12<=9,-0.3970,ifelse(df_taxi$frec_calificacion_0_1m12<=11,-0.0429,ifelse(df_taxi$frec_calificacion_0_1m12>11,0.1769,0))))
+### 15
+df_taxi$mora_max1m6_max7m12_woe=ifelse(is.na(df_taxi$mora_max1m6_max7m12),-0.4348,ifelse(df_taxi$mora_max1m6_max7m12%in%c('1. Mora 0'),0.1731,ifelse(df_taxi$mora_max1m6_max7m12%in%c('2. Menor mora'),-0.2107,-0.4348)))
+### 16
+df_taxi$linea_activa_1m_woe=ifelse(is.na(df_taxi$linea_activa_1m),-0.5304,ifelse(df_taxi$linea_activa_1m<=3600,-0.1553,ifelse(df_taxi$linea_activa_1m<=11396.4,0.1394,ifelse(df_taxi$linea_activa_1m>11396.4,0.5054,-0.5304))))
+### 17
+df_taxi$linea_total_max1m12_woe=ifelse(is.na(df_taxi$linea_total_max1m12),-0.6070,ifelse(df_taxi$linea_total_max1m12<=2974.036,-0.1683,ifelse(df_taxi$linea_total_max1m12<=4008.922,-0.0824,ifelse(df_taxi$linea_total_max1m12<=9566.686,0.1215,ifelse(df_taxi$linea_total_max1m12<=12580.78,0.2618,ifelse(df_taxi$linea_total_max1m12>12580.78,0.4529,-0.6070))))))
+### 18
+df_taxi$linea_usada_1m_max2m12_woe=ifelse(is.na(df_taxi$linea_usada_1m_max2m12),-0.2185,ifelse(df_taxi$linea_usada_1m_max2m12%in%c('1. Menor linea_usada'),0.1809,-0.2185))
+### 19
+df_taxi$mora_max1m6_woe=ifelse(is.na(df_taxi$mora_max1m6),-0.5724,ifelse(df_taxi$mora_max1m6==0,0.0989,-0.5724))
+### 20
+df_taxi$linea_activa_max1m12_woe=ifelse(is.na(df_taxi$linea_activa_max1m12),-0.6107,ifelse(df_taxi$linea_activa_max1m12<=2957.212,-0.1763,ifelse(df_taxi$linea_activa_max1m12<=4000,-0.0415,ifelse(df_taxi$linea_activa_max1m12<=9536.151,0.1037,ifelse(df_taxi$linea_activa_max1m12<=12666.4,0.3222,ifelse(df_taxi$linea_activa_max1m12>12666.4,0.4529,-0.6107))))))
+### 21
+df_taxi$linea_por_uso_1m_max2m12_woe=ifelse(is.na(df_taxi$linea_por_uso_1m_max2m12),-0.2930,ifelse(df_taxi$linea_por_uso_1m_max2m12%in%c('1. Menor linea_por_uso'),0.1505,-0.2930))
+### 22
+df_taxi$linea_total_max1m6_woe=ifelse(is.na(df_taxi$linea_total_max1m6),-0.5835,ifelse(df_taxi$linea_total_max1m6<=3902.516,-0.1377,ifelse(df_taxi$linea_total_max1m6<=9218.808,0.1057,ifelse(df_taxi$linea_total_max1m6<=12180.8,0.2259,ifelse(df_taxi$linea_total_max1m6>12180.8,0.4803,-0.5835)))))
+### 23
+df_taxi$linea_activa_max1m6_woe=ifelse(is.na(df_taxi$linea_activa_max1m6),-0.5835,ifelse(df_taxi$linea_activa_max1m6<=3900,-0.1393,ifelse(df_taxi$linea_activa_max1m6<=9193,0.1014,ifelse(df_taxi$linea_activa_max1m6<=12213.97,0.2854,ifelse(df_taxi$linea_activa_max1m6>12213.97,0.4635,-0.5835)))))
+### 24
+df_taxi$saldo_max1m3_max4m12_woe=ifelse(is.na(df_taxi$saldo_max1m3_max4m12),-0.1742,ifelse(df_taxi$saldo_max1m3_max4m12%in%c('1. Menor saldo'),0.2921,-0.1742))
+### 25
+df_taxi$linea_nousada_min1m6_woe=ifelse(is.na(df_taxi$linea_nousada_min1m6),-0.5835,ifelse(df_taxi$linea_nousada_min1m6<=15.56,-0.2074,ifelse(df_taxi$linea_nousada_min1m6<=259.6,0.0517,ifelse(df_taxi$linea_nousada_min1m6<=491.26,0.2554,ifelse(df_taxi$linea_nousada_min1m6>491.26,0.3913,-0.5835)))))
+### 26
+df_taxi$mora_max1m3_max4m12_woe=ifelse(is.na(df_taxi$mora_max1m3_max4m12),-0.4803,ifelse(df_taxi$mora_max1m3_max4m12%in%c('1. Mora 0'),0.1445,ifelse(df_taxi$mora_max1m3_max4m12%in%c('2. Menor mora'),-0.2596,-0.4803)))
+### 27
+df_taxi$linea_total_1m_woe=ifelse(is.na(df_taxi$linea_total_1m),-0.5304,ifelse(df_taxi$linea_total_1m<=3649.346,-0.1668,ifelse(df_taxi$linea_total_1m<=11370.39,0.1514,ifelse(df_taxi$linea_total_1m>11370.39,0.5054,-0.5304))))
+### 28
+df_taxi$linea_nousada_min1m3_woe=ifelse(is.na(df_taxi$linea_nousada_min1m3),-0.5673,ifelse(df_taxi$linea_nousada_min1m3<=56.71,-0.2413,ifelse(df_taxi$linea_nousada_min1m3<=475.87,0.0651,ifelse(df_taxi$linea_nousada_min1m3<=3142.805,0.3553,ifelse(df_taxi$linea_nousada_min1m3>3142.805,0.4437,-0.5673)))))
+### 29
+df_taxi$linea_activa_max1m3_woe=ifelse(is.na(df_taxi$linea_activa_max1m3),-0.5673,ifelse(df_taxi$linea_activa_max1m3<=3700,-0.1499,ifelse(df_taxi$linea_activa_max1m3<=11735.62,0.1353,ifelse(df_taxi$linea_activa_max1m3>11735.62,0.5116,-0.5673))))
+### 30
+df_taxi$linea_total_max1m3_woe=ifelse(is.na(df_taxi$linea_activa_max1m3),-0.5673,ifelse(df_taxi$linea_total_max1m3<=3764.568,-0.1474,ifelse(df_taxi$linea_total_max1m3<=11750,0.1334,ifelse(df_taxi$linea_total_max1m3>11750,0.5085,-0.5673))))
+### 31
+df_taxi$mora_max1m12_woe=ifelse(is.na(df_taxi$mora_max1m12),-0.3416,ifelse(df_taxi$mora_max1m12==0,0.1306,ifelse(df_taxi$mora_max1m12>0,-0.3416,-0.3416)))
+
+### 32
+df_taxi$linea_nousada_min1m12_woe=ifelse(is.na(df_taxi$linea_nousada_min1m12),-0.6070,ifelse(df_taxi$linea_nousada_min1m12<=14.342,-0.0734,ifelse(df_taxi$linea_nousada_min1m12<=1267.146,0.1706,ifelse(df_taxi$linea_nousada_min1m12>1267.146,0.2981,-0.6070))))
+### 33
+df_taxi$linea_por_uso_max1m12_woe=ifelse(is.na(df_taxi$linea_por_uso_max1m12),-0.6070,ifelse(df_taxi$linea_por_uso_max1m12<=0.8679308,0.2503,ifelse(df_taxi$linea_por_uso_max1m12<=0.9833393,0.1678,ifelse(df_taxi$linea_por_uso_max1m12>0.9833393,-0.0312,-0.6070))))
+### 34
+df_taxi$linea_por_uso_1m_woe=ifelse(is.na(df_taxi$linea_por_uso_1m),-0.5304,ifelse(df_taxi$linea_por_uso_1m<=0.763766,0.3547,ifelse(df_taxi$linea_por_uso_1m<=0.8400773,0.1904,ifelse(df_taxi$linea_por_uso_1m<=0.9418391,-0.0178,ifelse(df_taxi$linea_por_uso_1m>0.9418391,-0.2116,-0.5304)))))
+### 35
+df_taxi$rec_mora_0_1m12_woe=ifelse(is.na(df_taxi$rec_mora_0_1m12),-1.1138,ifelse(df_taxi$rec_mora_0_1m12<=1,0.0540,ifelse(df_taxi$rec_mora_0_1m12>1,-0.6214,-1.1138)))
+### 36
+df_taxi$disp_efectivo_1m_max2m12_woe=ifelse(is.na(df_taxi$disp_efectivo_1m_max2m12),-0.1550,ifelse(df_taxi$disp_efectivo_1m_max2m12%in%c('1. Menor disp_efectivo'),0.2518,-0.1550))
+### 37
+df_taxi$mora_1m_woe=ifelse(is.na(df_taxi$mora_1m),-0.7052,ifelse(df_taxi$mora_1m==0,0.0540,-0.7052))
+### 38
+df_taxi$mora_1m_max2m12_woe=ifelse(is.na(df_taxi$mora_1m_max2m12),-0.4740,ifelse(df_taxi$mora_1m_max2m12%in%c('1. Mora 0'),0.1196,ifelse(df_taxi$mora_1m_max2m12%in%c('2. Menor mora'),-0.2598,-0.4740)))
+### 39
+df_taxi$disp_efectivo_max1m3_max4m12_woe=ifelse(is.na(df_taxi$disp_efectivo_max1m3_max4m12),-0.1114,ifelse(df_taxi$disp_efectivo_max1m3_max4m12%in%c('1. Menor disp_efectivo'),0.2974,-0.1114))
+### 40
+df_taxi$can_emp_max1m3_max4m12_woe=ifelse(is.na(df_taxi$can_emp_max1m3_max4m12),-0.2674,ifelse(df_taxi$can_emp_max1m3_max4m12%in%c('1. Menor can_emp'),0.2584,ifelse(df_taxi$can_emp_max1m3_max4m12%in%c('2. Igual can_emp'),0.1011,-0.2674)))
+### 41
+df_taxi$expcred_1m12_woe=ifelse(is.na(df_taxi$expcred_1m12),-0.3551,ifelse(df_taxi$expcred_1m12>10,0.1105,-0.3551))
+### 42
+df_taxi$saldo_por_mora0_min1m12_woe=ifelse(is.na(df_taxi$saldo_por_mora0_min1m12),-0.9315,ifelse(df_taxi$saldo_por_mora0_min1m12<=0,-0.6282,ifelse(df_taxi$saldo_por_mora0_min1m12<=0.8816846,-0.2863,ifelse(df_taxi$saldo_por_mora0_min1m12>0.8816846,0.1208,-0.9315))))
+### 43
+df_taxi$mora_max1m3_woe=ifelse(is.na(df_taxi$mora_max1m3),-0.5377,ifelse(df_taxi$mora_max1m3==0,0.0671,-0.5377))
+### 44
+df_taxi$can_emp_1m_max2m12_woe=ifelse(is.na(df_taxi$can_emp_1m_max2m12),-0.3584,ifelse(df_taxi$can_emp_1m_max2m12%in%c('1. Menor can_emp'),0.2743,ifelse(df_taxi$can_emp_1m_max2m12%in%c('2. Igual can_emp'),-0.0154,-0.3584)))
+### 45
+df_taxi$por_cal0_min1m6_min7m12_woe=ifelse(is.na(df_taxi$por_cal0_min1m6_min7m12),-0.2954,ifelse(df_taxi$por_cal0_min1m6_min7m12%in%c('1. Normal 100'),0.0778,-0.2954))
+### 46
+df_taxi$por_cal1_max1m12_woe=ifelse(is.na(df_taxi$por_cal1_max1m12),-0.9315,ifelse(df_taxi$por_cal1_max1m12<=0,0.0467,ifelse(df_taxi$por_cal1_max1m12>0,-0.3261,-0.9315)))
+### 47
+df_taxi$saldo_1m_max2m12_woe=ifelse(is.na(df_taxi$saldo_1m_max2m12),-0.1922,ifelse(df_taxi$saldo_1m_max2m12%in%c('1. Menor saldo'),0.1046,-0.1922))
+### 48
+df_taxi$calificacion_max1m6_max7m12_woe=ifelse(is.na(df_taxi$calificacion_max1m6_max7m12),-0.4103,ifelse(df_taxi$calificacion_max1m6_max7m12%in%c('1. Normal'),0.0572,ifelse(df_taxi$calificacion_max1m6_max7m12%in%c('3. Menor Calificacion'),-0.2106,-0.4103)))
+```
+
+```{r}
+dim(df_taxi)
+```
+
+```{r}
+########## Gini 5
+zfinal_taxi=predict(modelo5,newdata=df_taxi)
+pfinal_taxi=1/(1+exp(-zfinal_taxi))
+```
+
+```{r}
+#####################################
+######   BASE FINAL
+#####################################
+write.table(cbind(df_taxi$co,df_taxi$cosecha,df_taxi$tm_prima,pfinal_taxi),'D:/01.Comite_Riesgos/08 Centro de Modelos de Riesgos/002 CREDIT SCORING/NO TRADICIONALES/LD Consumo/2020/02.Febrero/MODELO/df_taxi_pfinal_taxi.csv', sep=',')
+```
+
+```{r}
+##################### graficas variables
+
+summary(df_taxi_train$edad)
+hist(df_taxi_train$edad, main="Edad", col = "skyblue")
+```
+
+```{r}
+summary(df_taxi_train$frec_por_cal0_100_1m12)
+hist(df_taxi_train$frec_por_cal0_100_1m12, main="Frecuencia 100% Normal", col = "skyblue")
+```
+
+```{r}
+summary(df_taxi_train$mora_max1m12)
+hist(df_taxi_train$mora_max1m12, main="Mora", col = "skyblue")
+```
+
+```{r}
+summary(df_taxi_train$linea_por_uso_1m)
+hist(df_taxi_train$linea_por_uso_1m, main="Uso Línea", col = "skyblue")
+```
+
+
+
