@@ -838,11 +838,11 @@ writeLines('\nTablas:')
 table(x_biv[[1]],df_tr[,'Malo_dm'],useNA = "ifany")
 table(x_biv[[2]],df_ts[,'Malo_dm'],useNA = "ifany")
 
-bin=bin_unique(df_tr,var)
-bin=c(0,2,4,6,9,11)
+# bin=bin_unique(df_tr,var)
+# bin=c(0,2,4,6,9,11)
 # bin=c(4,7)
-iv_num_2_altyx(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)[[1]][[1]]
-iv_num_2_altyx(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)[[2]][[1]]
+# iv_num_2_altyx(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)[[1]][[1]]
+# iv_num_2_altyx(df_tr,df_ts,var,'Malo_dm','tm_dm',bin)[[2]][[1]]
 ```
 
 ```{r warning=FALSE}
